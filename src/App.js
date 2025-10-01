@@ -1,69 +1,52 @@
-import React, { useState } from 'react';
-import { Calendar, Clock, User, Phone, Mail, Scissors, CheckCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Calendar, Clock, User, Phone, Mail, Scissors, CheckCircle, Loader } from 'lucide-react';
+
+const API_BASE = 'https://automations.sferal.ai/allports/webhook';
 
 function App() {
   const [currentStep, setCurrentStep] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [services, setServices] = useState([]);
+  
   const [formData, setFormData] = useState({
-    selectedServices: [],
+    selectedServiceId: '',
+    date: '',
+    time: '',
     name: '',
     phone: '',
-    email: '',
-    date: '',
-    time: ''
+    email: ''
   });
   const [submitted, setSubmitted] = useState(false);
 
-  // Servicii exacte din Airtable
-  const services = [
-    { id: 'haircut', name: 'Tuns Bărbați', price: 50, duration: 30, category: 'Coafură', description: 'Tuns clasic sau modern' },
-    { id: 'haircut-women', name: 'Tuns Femei', price: 80, duration: 45, category: 'Coafură', description: 'Tuns scurt, mediu sau lung' },
-    { id: 'coloring', name: 'Vopsit Păr', price: 150, duration: 120, category: 'Coafură', description: 'Vopsire completă sau parțială' },
-    { id: 'styling', name: 'Coafat', price: 80, duration: 45, category: 'Coafură', description: 'Coafat pentru evenimente' },
-    { id: 'beard', name: 'Aranjat Barbă', price: 35, duration: 20, category: 'Barbă', description: 'Contur și aranjare barbă' },
-    { id: 'manicure', name: 'Manichiură', price: 70, duration: 60, category: 'Cosmetică', description: 'Clasică sau semipermanentă' },
-    { id: 'pedicure', name: 'Pedichiură', price: 80, duration: 60, category: 'Cosmetică', description: 'Clasică sau SPA' },
-    { id: 'facial', name: 'Tratament Facial', price: 120, duration: 90, category: 'Cosmetică', description: 'Curățare și hidratare profundă' }
-  ];
-
   const timeSlots = [
-    '06:00', '06:30', '07:00', '07:30', '08:00', '08:30',
-    '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
-    '12:00', '12:30', '13:00', '13:30', '14:00', '14:30',
-    '15:00', '15:30', '16:00', '16:30', '17:00', '17:30',
-    '18:00', '18:30', '19:00', '19:30', '20:00', '20:30'
+    '09:00', '10:00', '11:00', '12:00', '13:00', 
+    '14:00', '15:00', '16:00', '17:00', '18:00'
   ];
 
-  const handleServiceToggle = (serviceId) => {
-    const newServices = formData.selectedServices.includes(serviceId)
-      ? formData.selectedServices.filter(id => id !== serviceId)
-      : [...formData.selectedServices, serviceId];
-    
-    setFormData(prev => ({ ...prev, selectedServices: newServices }));
+  useEffect(() => {
+    loadConfig();
+  }, []);
+
+  const loadConfig = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/config`);
+      const data = await response.json();
+      
+      if (data.success && data.services) {
+        setServices(data.services);
+      } else {
+        alert('Nu s-au putut încărca serviciile. Reîncarcă pagina.');
+      }
+    } catch (error) {
+      console.error('Eroare la încărcarea configurației:', error);
+      alert('Nu s-au putut încărca serviciile. Verifică conexiunea.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
-  };
-
-  const getTotalPrice = () => {
-    return formData.selectedServices.reduce((sum, serviceId) => {
-      const service = services.find(s => s.id === serviceId);
-      return sum + (service ? service.price : 0);
-    }, 0);
-  };
-
-  const getTotalDuration = () => {
-    return formData.selectedServices.reduce((sum, serviceId) => {
-      const service = services.find(s => s.id === serviceId);
-      return sum + (service ? service.duration : 0);
-    }, 0);
-  };
-
-  const getSelectedServicesNames = () => {
-    return formData.selectedServices.map(id => {
-      const service = services.find(s => s.id === id);
-      return service ? service.name : '';
-    }).join(', ');
   };
 
   const handleSubmit = async () => {
@@ -71,25 +54,24 @@ function App() {
       const bookingData = {
         date: formData.date,
         time: formData.time,
-        services: formData.selectedServices,
+        services: [formData.selectedServiceId],
         staffId: "anyone",
         clientName: formData.name,
         clientPhone: formData.phone,
         clientEmail: formData.email
       };
 
-      const response = await fetch('https://automations.sferal.ai/allports/webhook/create-booking', {
+      const response = await fetch(`${API_BASE}/create-booking`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(bookingData)
       });
 
-      const data = await response.json();
-
       if (response.ok) {
         setSubmitted(true);
       } else {
-        alert(data.error || 'A apărut o eroare la crearea rezervării. Te rugăm să încerci din nou.');
+        const errorData = await response.json();
+        alert(errorData.error || 'A apărut o eroare la crearea rezervării.');
       }
     } catch (error) {
       console.error('Eroare la trimitere:', error);
@@ -98,7 +80,7 @@ function App() {
   };
 
   const nextStep = () => {
-    if (currentStep === 1 && formData.selectedServices.length > 0) setCurrentStep(2);
+    if (currentStep === 1 && formData.selectedServiceId) setCurrentStep(2);
     else if (currentStep === 2 && formData.date && formData.time) setCurrentStep(3);
   };
 
@@ -106,14 +88,30 @@ function App() {
     if (currentStep > 1) setCurrentStep(currentStep - 1);
   };
 
+  const getSelectedService = () => {
+    return services.find(s => s.id === formData.selectedServiceId);
+  };
+
+  if (loading) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.loadingCard}>
+          <Loader size={48} />
+          <p style={{ marginTop: '20px', fontSize: '18px' }}>Se încarcă serviciile...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (submitted) {
+    const selectedService = getSelectedService();
     return (
       <div style={styles.container}>
         <div style={styles.successCard}>
           <CheckCircle size={64} color="#10b981" />
           <h1 style={styles.successTitle}>Programare Confirmată!</h1>
           <p style={styles.successText}>
-            Mulțumim, {formData.name}! Programarea ta pentru {getSelectedServicesNames()}
+            Mulțumim, {formData.name}! Programarea ta pentru {selectedService?.name} 
             pe data de {formData.date} la ora {formData.time} a fost confirmată.
           </p>
           <p style={styles.successSubtext}>
@@ -125,12 +123,12 @@ function App() {
               setSubmitted(false);
               setCurrentStep(1);
               setFormData({
-                selectedServices: [],
+                selectedServiceId: '',
+                date: '',
+                time: '',
                 name: '',
                 phone: '',
-                email: '',
-                date: '',
-                time: ''
+                email: ''
               });
             }}
           >
@@ -165,33 +163,27 @@ function App() {
 
         {currentStep === 1 && (
           <div style={styles.stepContent}>
-            <h2 style={styles.stepTitle}>Alege Serviciile</h2>
+            <h2 style={styles.stepTitle}>Alege Serviciul</h2>
             <div style={styles.servicesGrid}>
               {services.map(service => (
                 <button
                   key={service.id}
                   style={{
                     ...styles.serviceCard,
-                    ...(formData.selectedServices.includes(service.id) ? styles.serviceCardActive : {})
+                    ...(formData.selectedServiceId === service.id ? styles.serviceCardActive : {})
                   }}
-                  onClick={() => handleServiceToggle(service.id)}
+                  onClick={() => handleInputChange('selectedServiceId', service.id)}
                 >
                   <Scissors size={24} />
                   <h3 style={styles.serviceName}>{service.name}</h3>
                   <p style={styles.servicePrice}>{service.price} RON</p>
                   <p style={styles.serviceDuration}>{service.duration} min</p>
-                  <p style={styles.serviceDescription}>{service.description}</p>
+                  {service.description && (
+                    <p style={styles.serviceDescription}>{service.description}</p>
+                  )}
                 </button>
               ))}
             </div>
-            
-            {formData.selectedServices.length > 0 && (
-              <div style={styles.selectionSummary}>
-                <p><strong>Servicii selectate:</strong> {getSelectedServicesNames()}</p>
-                <p><strong>Durată totală:</strong> {getTotalDuration()} minute</p>
-                <p><strong>Preț total:</strong> {getTotalPrice()} RON</p>
-              </div>
-            )}
           </div>
         )}
 
@@ -216,7 +208,7 @@ function App() {
             <div style={styles.inputGroup}>
               <label style={styles.label}>
                 <Clock size={20} />
-                Ora (Program: 06:00 - 21:00)
+                Ora
               </label>
               <div style={styles.timeSlotsGrid}>
                 {timeSlots.map(time => (
@@ -284,9 +276,9 @@ function App() {
 
             <div style={styles.summary}>
               <h3 style={styles.summaryTitle}>Rezumat Programare</h3>
-              <p><strong>Servicii:</strong> {getSelectedServicesNames()}</p>
-              <p><strong>Durată totală:</strong> {getTotalDuration()} minute</p>
-              <p><strong>Preț total:</strong> {getTotalPrice()} RON</p>
+              <p><strong>Serviciu:</strong> {getSelectedService()?.name}</p>
+              <p><strong>Preț:</strong> {getSelectedService()?.price} RON</p>
+              <p><strong>Durată:</strong> {getSelectedService()?.duration} min</p>
               <p><strong>Data:</strong> {formData.date}</p>
               <p><strong>Ora:</strong> {formData.time}</p>
             </div>
@@ -305,7 +297,7 @@ function App() {
               style={{
                 ...styles.buttonPrimary,
                 ...(
-                  (currentStep === 1 && formData.selectedServices.length === 0) ||
+                  (currentStep === 1 && !formData.selectedServiceId) ||
                   (currentStep === 2 && (!formData.date || !formData.time))
                     ? styles.buttonDisabled 
                     : {}
@@ -313,7 +305,7 @@ function App() {
               }}
               onClick={nextStep}
               disabled={
-                (currentStep === 1 && formData.selectedServices.length === 0) ||
+                (currentStep === 1 && !formData.selectedServiceId) ||
                 (currentStep === 2 && (!formData.date || !formData.time))
               }
             >
@@ -352,11 +344,18 @@ const styles = {
     backgroundColor: 'white',
     borderRadius: '20px',
     padding: '40px',
-    maxWidth: '900px',
+    maxWidth: '800px',
     width: '100%',
-    boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
-    maxHeight: '90vh',
-    overflowY: 'auto'
+    boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
+  },
+  loadingCard: {
+    backgroundColor: 'white',
+    borderRadius: '20px',
+    padding: '60px',
+    textAlign: 'center',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center'
   },
   title: {
     fontSize: '32px',
@@ -413,9 +412,8 @@ const styles = {
   },
   servicesGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-    gap: '15px',
-    marginBottom: '20px'
+    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+    gap: '15px'
   },
   serviceCard: {
     padding: '20px',
@@ -454,13 +452,7 @@ const styles = {
   serviceDescription: {
     fontSize: '12px',
     color: '#9ca3af',
-    margin: 0
-  },
-  selectionSummary: {
-    backgroundColor: '#f0f4ff',
-    padding: '15px',
-    borderRadius: '8px',
-    border: '2px solid #667eea'
+    margin: '4px 0 0 0'
   },
   inputGroup: {
     marginBottom: '20px'
