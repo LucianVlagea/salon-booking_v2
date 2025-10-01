@@ -1,60 +1,116 @@
-import React, { useState } from 'react';
-import { Calendar, Clock, User, Phone, Mail, Scissors, CheckCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Calendar, Clock, User, Phone, Mail, Scissors, CheckCircle, Loader } from 'lucide-react';
+
+const API_BASE = 'https://automations.sferal.ai/allports/webhook';
 
 function App() {
   const [currentStep, setCurrentStep] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [services, setServices] = useState([]);
+  const [staff, setStaff] = useState([]);
+  const [availableSlots, setAvailableSlots] = useState({});
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  
   const [formData, setFormData] = useState({
-    name: '',
-    phone: '',
-    email: '',
-    service: '',
+    selectedServices: [],
+    staffId: 'anyone',
     date: '',
-    time: ''
+    time: '',
+    clientName: '',
+    clientPhone: '',
+    clientEmail: ''
   });
   const [submitted, setSubmitted] = useState(false);
 
-  const services = [
-    { id: 1, name: 'Tuns Damă', price: '80 RON', duration: '45 min' },
-    { id: 2, name: 'Tuns Bărbat', price: '50 RON', duration: '30 min' },
-    { id: 3, name: 'Vopsit', price: '150 RON', duration: '90 min' },
-    { id: 4, name: 'Coafat', price: '100 RON', duration: '60 min' },
-    { id: 5, name: 'Manichiură', price: '70 RON', duration: '45 min' },
-    { id: 6, name: 'Pedichiură', price: '80 RON', duration: '60 min' }
-  ];
+  useEffect(() => {
+    loadConfig();
+  }, []);
 
-  const timeSlots = [
-    '09:00', '10:00', '11:00', '12:00', '13:00', 
-    '14:00', '15:00', '16:00', '17:00', '18:00'
-  ];
+  const loadConfig = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/config`);
+      const data = await response.json();
+      
+      if (data.success) {
+        setServices(data.services || []);
+        setStaff(data.staff || []);
+      }
+    } catch (error) {
+      console.error('Eroare la încărcarea configurației:', error);
+      alert('Nu s-au putut încărca serviciile. Reîncarcă pagina.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const handleInputChange = (field, value) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+  const loadAvailableSlots = async (date, serviceIds) => {
+    if (!date || serviceIds.length === 0) return;
+    
+    setLoadingSlots(true);
+    try {
+      const servicesParam = serviceIds.join(',');
+      const url = `${API_BASE}/available-slots?date=${date}&services=${servicesParam}&staffId=${formData.staffId}`;
+      
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      if (data.success) {
+        setAvailableSlots(data.availableSlots || {});
+      } else {
+        alert('Nu s-au putut încărca sloturile disponibile.');
+      }
+    } catch (error) {
+      console.error('Eroare la încărcarea sloturilor:', error);
+      alert('Eroare la verificarea disponibilității.');
+    } finally {
+      setLoadingSlots(false);
+    }
+  };
+
+  const handleServiceToggle = (serviceId) => {
+    const newServices = formData.selectedServices.includes(serviceId)
+      ? formData.selectedServices.filter(id => id !== serviceId)
+      : [...formData.selectedServices, serviceId];
+    
+    setFormData(prev => ({ ...prev, selectedServices: newServices }));
+    
+    if (formData.date && newServices.length > 0) {
+      loadAvailableSlots(formData.date, newServices);
+    }
+  };
+
+  const handleDateChange = (date) => {
+    setFormData(prev => ({ ...prev, date, time: '' }));
+    if (formData.selectedServices.length > 0) {
+      loadAvailableSlots(date, formData.selectedServices);
+    }
   };
 
   const handleSubmit = async () => {
     try {
-      const responses = await Promise.all([
-        fetch('https://eugen.app.n8n.cloud/webhook/salon-booking', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(formData)
-        }),
-        
-        fetch('YOUR_MAKE_WEBHOOK_URL', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(formData)
-        }),
-        
-        fetch('YOUR_ZAPIER_WEBHOOK_URL', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(formData)
-        })
-      ]);
+      const bookingData = {
+        date: formData.date,
+        time: formData.time,
+        services: formData.selectedServices,
+        staffId: formData.staffId,
+        clientName: formData.clientName,
+        clientPhone: formData.clientPhone,
+        clientEmail: formData.clientEmail
+      };
 
-      console.log('Răspunsuri API:', responses);
-      setSubmitted(true);
+      const response = await fetch(`${API_BASE}/create-booking`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bookingData)
+      });
+
+      const data = await response.json();
+      
+      if (response.ok) {
+        setSubmitted(true);
+      } else {
+        alert(data.error || 'A apărut o eroare la crearea rezervării.');
+      }
     } catch (error) {
       console.error('Eroare la trimitere:', error);
       alert('A apărut o eroare. Te rugăm să încerci din nou.');
@@ -62,7 +118,7 @@ function App() {
   };
 
   const nextStep = () => {
-    if (currentStep === 1 && formData.service) setCurrentStep(2);
+    if (currentStep === 1 && formData.selectedServices.length > 0) setCurrentStep(2);
     else if (currentStep === 2 && formData.date && formData.time) setCurrentStep(3);
   };
 
@@ -70,18 +126,43 @@ function App() {
     if (currentStep > 1) setCurrentStep(currentStep - 1);
   };
 
+  const getSelectedServicesDetails = () => {
+    return services.filter(s => formData.selectedServices.includes(s.id));
+  };
+
+  const getTotalPrice = () => {
+    return getSelectedServicesDetails().reduce((sum, s) => sum + s.price, 0);
+  };
+
+  const getTotalDuration = () => {
+    return getSelectedServicesDetails().reduce((sum, s) => sum + s.duration, 0);
+  };
+
+  if (loading) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.loadingCard}>
+          <Loader size={48} style={{ animation: 'spin 1s linear infinite' }} />
+          <p style={{ marginTop: '20px', fontSize: '18px' }}>Se încarcă...</p>
+        </div>
+      </div>
+    );
+  }
+
   if (submitted) {
+    const selectedServices = getSelectedServicesDetails();
     return (
       <div style={styles.container}>
         <div style={styles.successCard}>
           <CheckCircle size={64} color="#10b981" />
           <h1 style={styles.successTitle}>Programare Confirmată!</h1>
           <p style={styles.successText}>
-            Mulțumim, {formData.name}! Programarea ta pentru {formData.service} 
-            pe data de {formData.date} la ora {formData.time} a fost confirmată.
+            Mulțumim, {formData.clientName}! Programarea ta pentru{' '}
+            {selectedServices.map(s => s.name).join(', ')} pe data de{' '}
+            {formData.date} la ora {formData.time} a fost confirmată.
           </p>
           <p style={styles.successSubtext}>
-            Vei primi un email de confirmare la {formData.email}
+            Vei primi un email de confirmare la {formData.clientEmail}
           </p>
           <button 
             style={styles.successButton}
@@ -89,8 +170,15 @@ function App() {
               setSubmitted(false);
               setCurrentStep(1);
               setFormData({
-                name: '', phone: '', email: '', service: '', date: '', time: ''
+                selectedServices: [],
+                staffId: 'anyone',
+                date: '',
+                time: '',
+                clientName: '',
+                clientPhone: '',
+                clientEmail: ''
               });
+              setAvailableSlots({});
             }}
           >
             Programare Nouă
@@ -99,6 +187,12 @@ function App() {
       </div>
     );
   }
+
+  const allTimeSlots = [
+    ...(availableSlots.morning || []),
+    ...(availableSlots.afternoon || []),
+    ...(availableSlots.evening || [])
+  ];
 
   return (
     <div style={styles.container}>
@@ -124,21 +218,24 @@ function App() {
 
         {currentStep === 1 && (
           <div style={styles.stepContent}>
-            <h2 style={styles.stepTitle}>Alege Serviciul</h2>
+            <h2 style={styles.stepTitle}>Alege Serviciile</h2>
             <div style={styles.servicesGrid}>
               {services.map(service => (
                 <button
                   key={service.id}
                   style={{
                     ...styles.serviceCard,
-                    ...(formData.service === service.name ? styles.serviceCardActive : {})
+                    ...(formData.selectedServices.includes(service.id) ? styles.serviceCardActive : {})
                   }}
-                  onClick={() => handleInputChange('service', service.name)}
+                  onClick={() => handleServiceToggle(service.id)}
                 >
                   <Scissors size={24} />
                   <h3 style={styles.serviceName}>{service.name}</h3>
-                  <p style={styles.servicePrice}>{service.price}</p>
-                  <p style={styles.serviceDuration}>{service.duration}</p>
+                  <p style={styles.servicePrice}>{service.price} RON</p>
+                  <p style={styles.serviceDuration}>{service.duration} min</p>
+                  {service.description && (
+                    <p style={styles.serviceDescription}>{service.description}</p>
+                  )}
                 </button>
               ))}
             </div>
@@ -158,31 +255,89 @@ function App() {
                 type="date"
                 style={styles.input}
                 value={formData.date}
-                onChange={(e) => handleInputChange('date', e.target.value)}
+                onChange={(e) => handleDateChange(e.target.value)}
                 min={new Date().toISOString().split('T')[0]}
               />
             </div>
 
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>
-                <Clock size={20} />
-                Ora
-              </label>
-              <div style={styles.timeSlotsGrid}>
-                {timeSlots.map(time => (
-                  <button
-                    key={time}
-                    style={{
-                      ...styles.timeSlot,
-                      ...(formData.time === time ? styles.timeSlotActive : {})
-                    }}
-                    onClick={() => handleInputChange('time', time)}
-                  >
-                    {time}
-                  </button>
-                ))}
+            {formData.date && (
+              <div style={styles.inputGroup}>
+                <label style={styles.label}>
+                  <Clock size={20} />
+                  Ora {loadingSlots && <Loader size={16} style={{ animation: 'spin 1s linear infinite' }} />}
+                </label>
+                
+                {loadingSlots ? (
+                  <p style={{ textAlign: 'center', padding: '20px' }}>Se verifică disponibilitatea...</p>
+                ) : allTimeSlots.length === 0 ? (
+                  <p style={{ textAlign: 'center', padding: '20px', color: '#ef4444' }}>
+                    Nu există sloturi disponibile pentru această dată. Selectează altă dată.
+                  </p>
+                ) : (
+                  <>
+                    {availableSlots.morning && availableSlots.morning.length > 0 && (
+                      <div style={{ marginBottom: '20px' }}>
+                        <h4 style={styles.timeGroupTitle}>Dimineața (6:00 - 12:00)</h4>
+                        <div style={styles.timeSlotsGrid}>
+                          {availableSlots.morning.map(time => (
+                            <button
+                              key={time}
+                              style={{
+                                ...styles.timeSlot,
+                                ...(formData.time === time ? styles.timeSlotActive : {})
+                              }}
+                              onClick={() => setFormData(prev => ({ ...prev, time }))}
+                            >
+                              {time}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {availableSlots.afternoon && availableSlots.afternoon.length > 0 && (
+                      <div style={{ marginBottom: '20px' }}>
+                        <h4 style={styles.timeGroupTitle}>După-amiaza (12:00 - 18:00)</h4>
+                        <div style={styles.timeSlotsGrid}>
+                          {availableSlots.afternoon.map(time => (
+                            <button
+                              key={time}
+                              style={{
+                                ...styles.timeSlot,
+                                ...(formData.time === time ? styles.timeSlotActive : {})
+                              }}
+                              onClick={() => setFormData(prev => ({ ...prev, time }))}
+                            >
+                              {time}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {availableSlots.evening && availableSlots.evening.length > 0 && (
+                      <div style={{ marginBottom: '20px' }}>
+                        <h4 style={styles.timeGroupTitle}>Seara (18:00 - 21:00)</h4>
+                        <div style={styles.timeSlotsGrid}>
+                          {availableSlots.evening.map(time => (
+                            <button
+                              key={time}
+                              style={{
+                                ...styles.timeSlot,
+                                ...(formData.time === time ? styles.timeSlotActive : {})
+                              }}
+                              onClick={() => setFormData(prev => ({ ...prev, time }))}
+                            >
+                              {time}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
-            </div>
+            )}
           </div>
         )}
 
@@ -199,8 +354,8 @@ function App() {
                 type="text"
                 style={styles.input}
                 placeholder="Ionescu Maria"
-                value={formData.name}
-                onChange={(e) => handleInputChange('name', e.target.value)}
+                value={formData.clientName}
+                onChange={(e) => setFormData(prev => ({ ...prev, clientName: e.target.value }))}
               />
             </div>
 
@@ -213,8 +368,8 @@ function App() {
                 type="tel"
                 style={styles.input}
                 placeholder="0712345678"
-                value={formData.phone}
-                onChange={(e) => handleInputChange('phone', e.target.value)}
+                value={formData.clientPhone}
+                onChange={(e) => setFormData(prev => ({ ...prev, clientPhone: e.target.value }))}
               />
             </div>
 
@@ -227,14 +382,16 @@ function App() {
                 type="email"
                 style={styles.input}
                 placeholder="exemplu@email.com"
-                value={formData.email}
-                onChange={(e) => handleInputChange('email', e.target.value)}
+                value={formData.clientEmail}
+                onChange={(e) => setFormData(prev => ({ ...prev, clientEmail: e.target.value }))}
               />
             </div>
 
             <div style={styles.summary}>
               <h3 style={styles.summaryTitle}>Rezumat Programare</h3>
-              <p><strong>Serviciu:</strong> {formData.service}</p>
+              <p><strong>Servicii:</strong> {getSelectedServicesDetails().map(s => s.name).join(', ')}</p>
+              <p><strong>Durată totală:</strong> {getTotalDuration()} minute</p>
+              <p><strong>Preț total:</strong> {getTotalPrice()} RON</p>
               <p><strong>Data:</strong> {formData.date}</p>
               <p><strong>Ora:</strong> {formData.time}</p>
             </div>
@@ -253,7 +410,7 @@ function App() {
               style={{
                 ...styles.buttonPrimary,
                 ...(
-                  (currentStep === 1 && !formData.service) ||
+                  (currentStep === 1 && formData.selectedServices.length === 0) ||
                   (currentStep === 2 && (!formData.date || !formData.time))
                     ? styles.buttonDisabled 
                     : {}
@@ -261,7 +418,7 @@ function App() {
               }}
               onClick={nextStep}
               disabled={
-                (currentStep === 1 && !formData.service) ||
+                (currentStep === 1 && formData.selectedServices.length === 0) ||
                 (currentStep === 2 && (!formData.date || !formData.time))
               }
             >
@@ -271,12 +428,12 @@ function App() {
             <button 
               style={{
                 ...styles.buttonPrimary,
-                ...(!formData.name || !formData.phone || !formData.email 
+                ...(!formData.clientName || !formData.clientPhone || !formData.clientEmail 
                   ? styles.buttonDisabled 
                   : {})
               }}
               onClick={handleSubmit}
-              disabled={!formData.name || !formData.phone || !formData.email}
+              disabled={!formData.clientName || !formData.clientPhone || !formData.clientEmail}
             >
               Confirmă Programarea
             </button>
@@ -300,9 +457,17 @@ const styles = {
     backgroundColor: 'white',
     borderRadius: '20px',
     padding: '40px',
-    maxWidth: '800px',
+    maxWidth: '900px',
     width: '100%',
-    boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
+    boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+    maxHeight: '90vh',
+    overflowY: 'auto'
+  },
+  loadingCard: {
+    backgroundColor: 'white',
+    borderRadius: '20px',
+    padding: '60px',
+    textAlign: 'center'
   },
   title: {
     fontSize: '32px',
@@ -359,7 +524,7 @@ const styles = {
   },
   servicesGrid: {
     display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
     gap: '15px'
   },
   serviceCard: {
@@ -372,7 +537,8 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    gap: '8px'
+    gap: '8px',
+    textAlign: 'center'
   },
   serviceCardActive: {
     borderColor: '#667eea',
@@ -381,16 +547,24 @@ const styles = {
   serviceName: {
     fontSize: '16px',
     fontWeight: 'bold',
-    color: '#1f2937'
+    color: '#1f2937',
+    margin: 0
   },
   servicePrice: {
     fontSize: '18px',
     color: '#667eea',
-    fontWeight: 'bold'
+    fontWeight: 'bold',
+    margin: 0
   },
   serviceDuration: {
     fontSize: '14px',
-    color: '#6b7280'
+    color: '#6b7280',
+    margin: 0
+  },
+  serviceDescription: {
+    fontSize: '12px',
+    color: '#9ca3af',
+    margin: '4px 0 0 0'
   },
   inputGroup: {
     marginBottom: '20px'
@@ -411,6 +585,12 @@ const styles = {
     borderRadius: '8px',
     fontSize: '16px',
     transition: 'border-color 0.3s'
+  },
+  timeGroupTitle: {
+    fontSize: '16px',
+    fontWeight: '600',
+    color: '#4b5563',
+    marginBottom: '10px'
   },
   timeSlotsGrid: {
     display: 'grid',
